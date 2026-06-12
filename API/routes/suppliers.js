@@ -1,164 +1,95 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
+const authMiddleware = require('../middleware/auth');
+const storeMiddleware = require('../middleware/store');
 
+// Middleware validation pipeline
+router.use(authMiddleware.verifyToken);
+router.use(storeMiddleware.setStore);
 
-// =======================
 // GET ALL SUPPLIERS
-// =======================
 router.get('/', async (req, res) => {
     try {
+        const storeId = req.store_id || 1; // Fallback safety layer
         const result = await pool.query(`
-            SELECT 
-                s.supplier_id,
-                s.supplier_name,
-                s.contact_person,
-                s.phone,
-                s.email,
-                l.city,
-                l.state_province
-            FROM suppliers s
-            LEFT JOIN locations l ON s.location_id = l.location_id
-            ORDER BY s.supplier_id ASC
-        `);
-
-        res.json(result.rows);
+            SELECT supplier_id, store_id, supplier_name 
+            FROM suppliers 
+            WHERE store_id = $1 
+            ORDER BY supplier_id ASC
+        `, [storeId]);
+        
+        // Return blank array instead of failing if null
+        res.json(result.rows || []); 
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Backend Registry Query Failed:", err.message);
+        res.status(500).json({ error: "Database execution failed", details: err.message });
     }
 });
 
-
-// =======================
-// GET SINGLE SUPPLIER
-// =======================
-router.get('/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const result = await pool.query(`
-            SELECT 
-                s.*,
-                l.city,
-                l.state_province,
-                l.street_address
-            FROM suppliers s
-            LEFT JOIN locations l ON s.location_id = l.location_id
-            WHERE s.supplier_id = $1
-        `, [id]);
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Supplier not found" });
-        }
-
-        res.json(result.rows[0]);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-
-// =======================
 // CREATE SUPPLIER
-// =======================
 router.post('/', async (req, res) => {
     try {
-        const {
-            supplier_name,
-            contact_person,
-            phone,
-            email,
-            location_id
-        } = req.body;
+        const storeId = req.store_id || 1;
+        const { supplier_name } = req.body;
 
-        if (!supplier_name) {
-            return res.status(400).json({ message: "supplier_name is required" });
+        if (!supplier_name || !supplier_name.trim()) {
+            return res.status(400).json({ error: "Supplier name parameter is missing" });
         }
 
         const result = await pool.query(`
-            INSERT INTO suppliers 
-            (supplier_name, contact_person, phone, email, location_id)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING *
-        `, [
-            supplier_name,
-            contact_person,
-            phone,
-            email,
-            location_id
-        ]);
+            INSERT INTO suppliers (store_id, supplier_name) 
+            VALUES ($1, $2) 
+            RETURNING supplier_id, store_id, supplier_name
+        `, [storeId, supplier_name.trim()]);
 
         res.status(201).json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Insert dropped:", err.message);
+        res.status(500).json({ error: "Failed to commit record" });
     }
 });
 
-
-// =======================
 // UPDATE SUPPLIER
-// =======================
 router.put('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-
-        const {
-            supplier_name,
-            contact_person,
-            phone,
-            email,
-            location_id
-        } = req.body;
+        const storeId = req.store_id || 1;
+        const { supplier_name } = req.body;
 
         const result = await pool.query(`
-            UPDATE suppliers
-            SET 
-                supplier_name = $1,
-                contact_person = $2,
-                phone = $3,
-                email = $4,
-                location_id = $5
-            WHERE supplier_id = $6
-            RETURNING *
-        `, [
-            supplier_name,
-            contact_person,
-            phone,
-            email,
-            location_id,
-            id
-        ]);
+            UPDATE suppliers 
+            SET supplier_name = $1 
+            WHERE supplier_id = $2 AND store_id = $3
+            RETURNING supplier_id, store_id, supplier_name
+        `, [supplier_name.trim(), id, storeId]);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Supplier not found" });
+            return res.status(404).json({ error: "Record link not found" });
         }
-
         res.json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: "Modification rejected" });
     }
 });
 
-
-// =======================
 // DELETE SUPPLIER
-// =======================
 router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        const storeId = req.store_id || 1;
 
         const result = await pool.query(
-            'DELETE FROM suppliers WHERE supplier_id = $1 RETURNING *',
-            [id]
+            'DELETE FROM suppliers WHERE supplier_id = $1 AND store_id = $2 RETURNING *',
+            [id, storeId]
         );
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Supplier not found" });
+            return res.status(404).json({ error: "Link not found" });
         }
-
-        res.json({ message: "Supplier deleted successfully" });
+        res.json({ message: "Purged clean" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: "Foreign key lock violation" });
     }
 });
 

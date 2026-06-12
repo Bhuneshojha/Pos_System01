@@ -1,135 +1,144 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
+const authMiddleware = require('../middleware/auth');
+const storeMiddleware = require('../middleware/store');
+const { requireManager } = require('../middleware/roles');
 
+// Application Global Request Stack Rules
+router.use(authMiddleware.verifyToken);
+router.use(storeMiddleware.setStore);
+router.use(requireManager());
 
-// =======================
+// ==========================================
 // GET ALL DEPARTMENTS
-// (with store info)
-// =======================
+// ==========================================
+// ==========================================
 router.get('/', async (req, res) => {
     try {
+        // Agar store_id string hai (e.g. "1" ya "default-store"), use safe number banayein
+        let storeId = parseInt(req.store_id, 10);
+        
+        // Agar parsing fail ho jaye ya fallback value chahiye ho (Jaise aapke default-store ke liye id 1 hai)
+        if (isNaN(storeId)) {
+            console.warn("Warning: store_id was not a number, falling back to 1.");
+            storeId = 1; 
+        }
+
         const result = await pool.query(`
             SELECT 
-                d.department_id,
-                d.department_name,
-                s.store_name,
-                s.phone AS store_phone,
-                s.email AS store_email
-            FROM departments d
-            LEFT JOIN stores s ON d.store_id = s.store_id
-            ORDER BY d.department_id ASC
-        `);
-
-        res.json(result.rows);
+                department_id,
+                department_name,
+                store_id
+            FROM departments
+            WHERE store_id = $1
+            ORDER BY department_id ASC
+        `, [storeId]);
+        
+        return res.json(result.rows || []);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Database connection failure on Departments fetch:", err.message);
+        return res.status(500).json({ error: "Database transaction failed: " + err.message });
     }
 });
-
-
-// =======================
-// GET SINGLE DEPARTMENT
-// =======================
+// ==========================================
 router.get('/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        const storeId = req.store_id;
 
         const result = await pool.query(`
-            SELECT 
-                d.*,
-                s.store_name,
-                s.phone,
-                s.email
-            FROM departments d
-            LEFT JOIN stores s ON d.store_id = s.store_id
-            WHERE d.department_id = $1
-        `, [id]);
+            SELECT department_id, department_name, store_id 
+            FROM departments 
+            WHERE department_id = $1 AND store_id = $2
+        `, [id, storeId]);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Department not found" });
+            return res.status(404).json({ message: "Department records not found." });
         }
 
-        res.json(result.rows[0]);
+        return res.json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ error: err.message });
     }
 });
 
-
-// =======================
+// ==========================================
 // CREATE DEPARTMENT
-// =======================
+// ==========================================
 router.post('/', async (req, res) => {
     try {
-        const { department_name, store_id } = req.body;
+        const { department_name } = req.body;
+        const storeId = req.store_id;
 
-        if (!department_name) {
-            return res.status(400).json({
-                message: "department_name is required"
-            });
+        if (!department_name || !department_name.trim()) {
+            return res.status(400).json({ message: "Department name is required." });
         }
 
         const result = await pool.query(`
-            INSERT INTO departments (department_name, store_id)
+            INSERT INTO departments (store_id, department_name)
             VALUES ($1, $2)
             RETURNING *
-        `, [department_name, store_id]);
+        `, [storeId, department_name.trim()]);
 
-        res.status(201).json(result.rows[0]);
+        return res.status(201).json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ error: err.message });
     }
 });
 
-
-// =======================
+// ==========================================
 // UPDATE DEPARTMENT
-// =======================
+// ==========================================
 router.put('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { department_name, store_id } = req.body;
+        const { department_name } = req.body;
+        const storeId = req.store_id;
+
+        if (!department_name || !department_name.trim()) {
+            return res.status(400).json({ message: "Department name cannot be empty." });
+        }
 
         const result = await pool.query(`
             UPDATE departments
-            SET 
-                department_name = $1,
-                store_id = $2
-            WHERE department_id = $3
+            SET department_name = $1
+            WHERE department_id = $2 AND store_id = $3
             RETURNING *
-        `, [department_name, store_id, id]);
+        `, [department_name.trim(), id, storeId]);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Department not found" });
+            return res.status(404).json({ message: "Department update targeting failed." });
         }
 
-        res.json(result.rows[0]);
+        return res.json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ error: err.message });
     }
 });
 
-
-// =======================
+// ==========================================
 // DELETE DEPARTMENT
-// =======================
+// ==========================================
 router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        const storeId = req.store_id;
 
         const result = await pool.query(
-            'DELETE FROM departments WHERE department_id = $1 RETURNING *',
-            [id]
+            'DELETE FROM departments WHERE department_id = $1 AND store_id = $2 RETURNING *',
+            [id, storeId]
         );
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Department not found" });
+            return res.status(404).json({ message: "Department not found." });
         }
 
-        res.json({ message: "Department deleted successfully" });
+        return res.json({ message: "Department deleted successfully." });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        return res.status(500).json({ 
+            error: "Cannot delete department while staff members are assigned to it." 
+        });
     }
 });
 
