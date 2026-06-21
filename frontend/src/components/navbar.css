@@ -1,0 +1,12 @@
+.navbar{display:flex;align-items:center;justify-content:space-between;padding:0.6rem 1rem;border-bottom:1px solid rgba(0,0,0,0.06);gap:1rem;background:#fff}
+.navbar .left-actions{display:flex;align-items:center;gap:0.75rem}
+.hamburger-btn{display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;font-size:1.1rem;padding:0.35rem;border-radius:6px;cursor:pointer}
+.hamburger-btn:focus{outline:2px solid rgba(0,0,0,0.08)}
+.search-box{display:flex;align-items:center;gap:0.5rem;background:#f3f4f6;padding:6px 10px;border-radius:8px}
+.search-box input{border:0;background:transparent;outline:none;width:220px}
+.user-icon{font-size:1.25rem;color:#374151}
+.store-info{font-weight:700;color:#111827;margin-right:0.6rem}
+@media (max-width: 768px){
+  .search-box input{width:120px}
+  .store-info{display:none}
+}
